@@ -4,5 +4,5 @@ This repository contains the Snakemake pipelines and supporting scripts used in 
 These pipelines are built to work with the conda environment provided by `environment.yml`. The pipelines are written for an HPCC running SLURM.
 
 ```
-mamba env create -c conda-forge -c bioconda -n ultralong_paper -f environment.yml
+mamba create  -n ultralong_paper -f environment.yml -c conda-forge -c bioconda
 ```
