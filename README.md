@@ -1,24 +1,15 @@
 # Manual validation finds only “ultralong” long-read sequencing enables faithful, population-level structural variant calling in _Drosophila melanogaster_ euchromatin (Hemker et al. 2025)
 This repository contains the Snakemake pipelines and supporting scripts used in Hemker et al. 2025. The pipelines are written for an HPCC running SLURM.
 ## Dependencies 
-
-These snakemake pipelines are built to work with the conda environments provided in the `envs/` directory. The versions listed are what were used in Hemker et al. 2025, though there now may be newer versions of programs.
-
----
-For long-read structural variant calling:
+These Snakemake (v9+) pipelines are built to work with singularity images. The versions are what were used in Hemker et al. 2025, though there now may be newer versions of programs. Singularity images can either be made from the provided Dockerfiles, or they can be created by pulling from the dockerhub.
 ```
-mamba create -n longread_sv -c conda-forge -c bioconda snakemake=9.1.7 minimap2=2.28 sniffles=2.0.7 cutesv=2.1.0 svim-asm=1.0.3 jasminesv=1.1.5 bcftools samtools
-# Debreak requires minimap2=2.15, so install it in its own environment
-# so that the up-to-date minimap2 can be used for for aligning.
-mamba create -n debreak -c conda-forge -c bioconda debreak=1.3
+singularity build longread_sv_calling.sif docker://jahemker/longread_sv_calling:latest
+singularity build shortread_sv_calling.sif docker://jahemker/shortread_sv_calling:latest
+singularity build longread_assembly.sif docker://jahemker/longread_assembly:latest
 ```
-Addtionally, the PAV `sif` is required from (https://github.com/EichlerLab/pav).
-
----
-For short-read structural variant calling:
+A conda environment to run snakemake (version >=9) is easiest.
 ```
+conda create -n snakemake -c conda-forge -c bioconda snakemake
 ```
 
-For long-read genome assembly:
-```
-```
+For workflow-specific details, see README files.
