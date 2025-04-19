@@ -1,0 +1,19 @@
+reference:
+  location: "/scratch/users/jahemker/seasonal_inbred/D.melanogaster.fa"
+  euchromatic: "/scratch/users/jahemker/seasonal_inbred/reference/dm6/bedfiles/euchromatic_regions.sorted.bed"
+project:
+  name: "snakemake_shortread"
+  dir: "/scratch/users/jahemker/seasonal_inbred/shortread_sv_calling_test"
+strains:
+  "/scratch/users/jahemker/seasonal_inbred/shortread_sv_calling_test/strains.txt"
+tools:
+  "/scratch/users/jahemker/seasonal_inbred/shortread_sv_calling_test/tools.txt"
+variant_params:
+  min_length: "50"
+  min_mapq: "20"
+  min_caller_support: "2"
+singularity_images:
+  parabricks: "/home/groups/dpetrov/jahemker/singularity_images/parabricks-4.0.1-1.simg"
+  shortread_sv_calling: "/scratch/users/jahemker/singularity_images/shortread_sv_calling.sif"
+scripts:
+  dup_to_ins: "/home/users/jahemker/seasonal-nanopore/sv_calling/vcf_dup_to_ins.py"
