@@ -1,0 +1,21 @@
+reference:
+  location: "/scratch/users/jahemker/seasonal_inbred/D.melanogaster.fa"
+  euchromatic: "/scratch/users/jahemker/seasonal_inbred/reference/dm6/bedfiles/euchromatic_regions.sorted.bed"
+project:
+  dir: "/scratch/users/jahemker/seasonal_inbred/longread_assembly_test"
+  fcsgx_dir: "/scratch/users/jahemker/fcs"
+  busco_dir: "/scratch/users/jahemker/seasonal_inbred/busco_lineage"
+strains:
+  "/scratch/users/jahemker/seasonal_inbred/longread_assembly_test/strains.txt"
+models: 
+  dorado: "dna_r10.4.1_e8.2_400bps_sup@v5.0.0"
+  medaka: "r1041_e82_400bps_sup_g615"
+  busco: "diptera_odb10"
+singularity_images:
+  longread_assembly: "/scratch/users/jahemker/singularity_images/longread_assembly.sif"
+  fcsgx_simg: "/home/groups/dpetrov/jahemker/singularity_images/fcsgx.simg"
+  fcsgx_sif: "/home/groups/dpetrov/jahemker/singularity_images/fcs-gx.sif"
+  fcs-adaptor: "/home/groups/dpetrov/jahemker/singularity_images/fcs-adaptor.sif"
+scripts:
+  fcs-adaptor: "/home/users/jahemker/seasonal-nanopore/fcs/run_fcsadaptor.sh"
+  fcs-gx: "/home/users/jahemker/seasonal-nanopore/fcs/run_fcsfx.py"

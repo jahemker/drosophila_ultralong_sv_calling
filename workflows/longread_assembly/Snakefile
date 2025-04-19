@@ -1,0 +1,579 @@
+#! /usr/bin/env python
+###########################################################################################
+# James A. Hemker, 2025
+# Snakemake pipeline for long-read assemblies
+# Input files:
+#       parameters_config.yaml - contains various parameters needed for this Snakefile
+#           [strains] - id of each strain/individual. Each id on a line, no header
+#           [reference][location] - Fasta file of reference genome for alignment
+#           [envs][longread_assembly] - location of singularity env
+#           [scripts][fcs-adaptor] - location for run_fcsadaptor.sh
+#           [singularity_image][fcsgx] - location to FCS_GX simg
+#           [dorado_model] - which basecalling model to use
+#
+#       Each strain/individual should have its own directory in the directory
+#       specified in parameters_config.yaml, formatted as follows. This assumes that
+#       basecalling has not yet been performed. If you have basecalled reads, make
+#       sure that they are in a subdirectory named reads/.
+#       strain_id/
+#           nanopore_raw/
+#               output directories from sequencing
+#           # if reads already basecalled:
+#           reads/
+#               strain_id.fastq.gz
+#
+##########################################################################################
+#
+# Note: We have run into issues running the rule fcs_adapter on our HPCC nodes.
+# We have been able to run it on local nodes, and then resume the pipeline from there.
+# We added a second rule all that will run the pipeline up to the fcs_adapter step.
+# We then run fcs_adapter on a local node, and then use the first rule all to complete the
+# pipeline.
+#
+###########################################################################################
+
+STRAINS = open(config["strains"], 'r').readlines()
+STRAINS = [x.rstrip() for x in STRAINS]
+
+#NCBI taxon ID. 7214 - D. melanogaster
+TAXID = "7214"
+
+#######################################################
+#   Change the rule all depending on desired output   #
+#######################################################
+
+# Standard rule all that will run through the entire pipeline.
+# Outputs the RepeatMasked assembly, a gff file for the assembly, and QC metrics.
+
+rule all:
+    input:
+        expand(f"{config['project']['dir']}/{{strain}}/qc/{{strain}}_qc_prescaffold.txt",strain=STRAINS),
+        expand(f"{config['project']['dir']}/{{strain}}/qc/{{strain}}_qc_postscaffold.txt",strain=STRAINS),
+        expand(f"{config['project']['dir']}/{{strain}}/assembly/{{strain}}.rm.fasta",strain=STRAINS),
+        expand(f"{config['project']['dir']}/{{strain}}/assembly/{{strain}}.rm.gff",strain=STRAINS)
+        # expand(f"{config['project']['dir']}/{{strain}}/{{strain}}_cleanup.done",strain=STRAINS)
+
+
+# This rule all will run up to the fcs_adaptor rule, allowing it to be run locally.
+# You can then resume with the rule all above.
+
+# rule all:
+#     input:
+#         expand(f"{config['project']['dir']}/{{strain}}/{{strain}}.medaka.fasta",strain=STRAINS)
+
+#################
+# Begin Part 1: #
+# Basecalling   #
+#################
+
+rule run_dorado:
+    resources:
+        time = "16:00:00",
+        cpus = 8,
+        mem_gb = 32,
+        partition = "gpu,owners",
+        constraint = '"GPU_GEN:VLT|GPU_GEN:AMP"',
+        gpus = "gpu:4"
+    singularity:
+        config['singularity_images']['longread_assembly']
+    input:
+        f"{config['project']['dir']}/{{strain}}/nanopore_raw/"
+    output:
+        f"{config['project']['dir']}/{{strain}}/reads/{{strain}}.dorado.fastq.gz"
+    params:
+        model=config['models']['dorado'],
+        model_dir=f"{config['project']['dir']}/{config['models']['dorado']}",
+        bam=f"{config['project']['dir']}/{{strain}}.dorado_bc.bam",
+        old_bam=f"{config['project']['dir']}/{{strain}}.old_dorado_bc.bam"
+    shell:
+        '''
+        dorado download --model {params.model} --directory {params.model_dir}
+        if [ -f {params.bam} ]; then 
+            mv {params.bam} {params.old_bam} && \
+            dorado basecaller --min-qscore 10 --recursive \
+                --resume-from {params.old_bam} \
+                {params.model_dir} {input} \
+                > {params.bam}
+        else
+            dorado basecaller --min-qscore 10 --recursive \
+                {params.model_dir} {input} \
+                > {params.bam}
+        fi 
+
+        samtools bam2fq -@ $(nproc) {params.bam} | pigz -p $(nproc) > {output}
+        '''
+
+##########################
+# Remove duplicate reads #
+##########################
+
+rule clean_fastq:
+    singularity:
+        config['singularity_images']['longread_assembly']
+    input:
+        f"{config['project']['dir']}/{{strain}}/reads/{{strain}}.dorado.fastq.gz"
+    output:
+        f"{config['project']['dir']}/{{strain}}/reads/{{strain}}.fastq.gz"
+    params:
+        f"{config['project']['dir']}/{{strain}}/reads/{{strain}}.dorado.clean.fastq"
+    shell:
+        '''
+        seqkit rmdup -n {input} > {params}
+        gzip {params}
+        '''
+
+#######################
+# Assemble with  Flye #
+#######################
+
+rule run_flye:
+    resources:
+        time = "48:00:00",
+        cpus = 16,
+        mem_gb = 128
+    singularity:
+        config['singularity_images']['longread_assembly']
+    input:
+        f"{config['project']['dir']}/{{strain}}/reads/{{strain}}.fastq.gz"
+    output:
+        flye_asm=f"{config['project']['dir']}/{{strain}}/flye/assembly.fasta",
+        draft=temp(f"{config['project']['dir']}/{{strain}}/draft/{{strain}}.draft.fasta")
+    params:
+        flye_dir=f"{config['project']['dir']}/{{strain}}/flye/"
+    shell:
+        '''
+        resume=""
+        if [ -d {params.flye_dir} ]; then
+            resume="--resume"
+        fi
+        flye --nano-hq {input} --threads $(nproc) --no-alt-contigs \
+            --out-dir {params.flye_dir} --read-error 0.03
+        cp {output.flye_asm} {output.draft}
+        '''
+
+###############################
+# Remove duplicate haplotypes #
+###############################
+
+rule run_purgeMap:
+    resources:
+        cpus = 12,
+        mem_gb = 64
+    singularity:
+        config['singularity_images']['longread_assembly']
+    input:
+        draft=f"{config['project']['dir']}/{{strain}}/draft/{{strain}}.draft.fasta",
+        reads=f"{config['project']['dir']}/{{strain}}/reads/{{strain}}.fastq.gz"
+    output:
+        paf=temp(f"{config['project']['dir']}/{{strain}}/purge/{{strain}}.paf"),
+        stat=temp(f"{config['project']['dir']}/{{strain}}/purge/PB.stat"),
+        pb=temp(f"{config['project']['dir']}/{{strain}}/purge/PB.base.cov")
+    params:
+        purge_dir=f"{config['project']['dir']}/{{strain}}/purge/"
+    shell:
+        '''
+        minimap2 -x map-ont -t $(nproc) {input.draft} \
+            {input.reads} > {output.paf} \
+            && pbcstat -O {params.purge_dir} {output.paf}
+        '''
+
+rule run_calcuts:
+    singularity:
+        config['singularity_images']['longread_assembly']
+    input:
+        f"{config['project']['dir']}/{{strain}}/purge/PB.stat"
+    output:
+        temp(f"{config['project']['dir']}/{{strain}}/purge/{{strain}}.cutoffs")
+    shell:
+        '''
+        calcuts {input} > {output}
+        '''
+
+rule run_purgeSplit:
+    singularity:
+        config['singularity_images']['longread_assembly']
+    input:
+        f"{config['project']['dir']}/{{strain}}/draft/{{strain}}.draft.fasta"
+    output:
+        f"{config['project']['dir']}/{{strain}}/purge/{{strain}}.fasta.split"
+    shell:
+        '''
+        split_fa {input} > {output}
+        '''
+
+rule run_purgeSplitMap:
+    resources:
+        cpus = 12,
+        mem_gb = 32
+    singularity:
+        config['singularity_images']['longread_assembly']
+    input:
+        f"{config['project']['dir']}/{{strain}}/purge/{{strain}}.fasta.split"
+    output:
+        temp(f"{config['project']['dir']}/{{strain}}/purge/{{strain}}.fasta.split.paf")
+    shell:
+        '''
+        minimap2 -xasm5 -t $(nproc) -DP {input} {input} > {output}
+        '''
+
+rule run_purgePurge:
+    resources:
+        mem_gb = 32
+    singularity:
+        config['singularity_images']['longread_assembly']
+    input:
+        paf=f"{config['project']['dir']}/{{strain}}/purge/{{strain}}.fasta.split.paf",
+        pb=f"{config['project']['dir']}/{{strain}}/purge/PB.base.cov",
+        cutoffs=f"{config['project']['dir']}/{{strain}}/purge/{{strain}}.cutoffs",
+        draft=f"{config['project']['dir']}/{{strain}}/draft/{{strain}}.draft.fasta"
+    output:
+        intervals=temp(f"{config['project']['dir']}/{{strain}}/purge/{{strain}}.dups.bed"),
+        log=temp(f"{config['project']['dir']}/{{strain}}/purge/{{strain}}.purge_dups.log"),
+        purged_fasta=temp(f"{config['project']['dir']}/{{strain}}/purge/{{strain}}.purged.fasta")
+    params:
+        purge_dir=f"{config['project']['dir']}/{{strain}}/purge/"
+    shell:
+        '''
+        cd {params.purge_dir}
+        purge_dups -2 -T {input.cutoffs} -c {input.pb} {input.paf} > \
+            {output.intervals} 2> {output.log} 
+        get_seqs -e {output.intervals} {input.draft}
+        mv purged.fa {output.purged_fasta} 
+        '''
+
+#########################
+# Polishing with medaka #
+#########################
+
+rule run_medakaAlign:
+    resources:
+        time = "6:00:00",
+        cpus = 12,
+        mem_gb = 92
+    singularity:
+        config['singularity_images']['longread_assembly']
+    input:
+        reads=f"{config['project']['dir']}/{{strain}}/reads/{{strain}}.fastq.gz",
+        draft=f"{config['project']['dir']}/{{strain}}/purge/{{strain}}.purged.fasta"
+    output:
+        temp(f"{config['project']['dir']}/{{strain}}.calls_to_draft.bam")
+    params:
+        prefix=f"{config['project']['dir']}/{{strain}}.calls_to_draft"
+    shell:
+        '''
+        mini_align -i {input.reads} -r {input.draft} -m \
+            -p {params.prefix} -t $(nproc)
+        '''
+rule run_medakaConsensus:
+    resources:
+        time = "4:00:00",
+        cpus = 4,
+        mem_gb = 32,
+        partition = "gpu,owners",
+        slurm_extra = "'constrain=\"GPU_GEN:VLT|GPU_GEN:AMP\" gpus=gpu:1'"
+    singularity:
+        config['singularity_images']['longread_assembly']
+    input:
+        f"{config['project']['dir']}/{{strain}}.calls_to_draft.bam"
+    output:
+        temp(f"{config['project']['dir']}/{{strain}}.hdf")
+    params:
+        model=config['models']['medaka']
+    shell:
+        '''
+        [ -f {output} ] && rm {output}
+        medaka consensus {input} {output} \
+            --model {params.model} --threads $(nproc)
+        '''
+rule run_medakaStitch:
+    resources:
+        cpus = 8,
+        mem_gb = 64
+    singularity:
+        config['singularity_images']['longread_assembly']
+    input:
+        hdf=f"{config['project']['dir']}/{{strain}}.hdf",
+        draft=f"{config['project']['dir']}/{{strain}}/purge/{{strain}}.purged.fasta"
+    output:
+        f"{config['project']['dir']}/{{strain}}/{{strain}}.medaka.fasta"
+    shell:
+        '''
+        medaka stitch {input.hdf} {input.draft} {output} \
+            && cat {output} \
+            | awk '/^>/{{print ">contig_" ++i; next}}{{print}}' > {wildcards.strain}.tmp.fa \
+            && mv {wildcards.strain}.tmp.fa {output}
+        '''
+
+#############################################################
+# Look at the FCS adaptor wiki for info on the fcs scripts: #
+# https://github.com/ncbi/fcs/wiki/FCS-GX-quickstart        #
+#############################################################
+
+rule run_FCSadaptor:
+    resources:
+        cpus = 4,
+        mem_gb = 16
+    singularity:
+        config['singularity_images']['longread_assembly']
+    input:
+        f"{config['project']['dir']}/{{strain}}/{{strain}}.medaka.fasta"
+    output:
+        f"{config['project']['dir']}/{{strain}}/{{strain}}.fcs-adaptor.fasta"
+    params:
+        out_dir=f"{config['project']['dir']}/{{strain}}/fcs-adaptor",
+        sif=config['singularity_images']['fcs-adaptor'],
+        adaptor_script=config['scripts']['fcs-adaptor']
+    shell:
+        '''
+        ml python/3.9.0
+        mkdir -p {params.out_dir}
+        {params.adaptor_script} \
+            --fasta-input {input} \
+            --output-dir {params.out_dir} \
+            --euk \
+            --container-engine singularity \
+            --image {params.sif}
+        mv {params.out_dir}/cleaned_sequences/{wildcards.strain}.medaka.fasta {output}
+        '''
+
+#######################
+# FCS-gx screen       #
+# Be aware, requires  #
+# significant storage #
+# and RAM             #
+#######################
+
+rule download_gxdb:
+    resources:
+        time = "24:00:00",
+        mem_gb = 16
+    singularity:
+        config['singularity_images']['longread_assembly']
+    output:
+        f"{config['project']['fcsgx_dir']}/gxdb/all.gxi"
+    params:
+        source_db_manifest="https://ftp.ncbi.nlm.nih.gov/genomes/TOOLS/FCS/database/latest/all.manifest",
+        local_db=config['project']['fcsgx_dir'],
+        fcs_default_image=config['singularity_images']['fcsgx_sif']
+    shell:
+        '''
+        SOURCE_DB_MANIFEST={params.source_db_manifest}
+        LOCAL_DB={params.local_db}
+        export FCS_DEFAULT_IMAGE={params.fcs_default_image}
+        ml python/3.9.0
+        python3 /scratch/users/jahemker/seasonal_inbred/fcs/fcs.py db get \
+            --mft "$SOURCE_DB_MANIFEST" --dir "$LOCAL_DB/gxdb"
+        '''
+
+rule run_FCSgx:
+    resources:
+        time = "5:00:00",
+        cpus = 12,
+        mem_gb = 512,
+        parition = "bigmem"
+    singularity:
+        config['singularity_images']['longread_assembly']
+    input:
+        adaptor_fasta=f"{config['project']['dir']}/{{strain}}/{{strain}}.fcs-adaptor.fasta",
+        gxdb_gxi=f"{config['project']['fcsgx_dir']}/gxdb/all.gxi"
+    output:
+        f"{config['project']['dir']}/{{strain}}/fcsgx/{{strain}}.fcs-adaptor.{TAXID}.fcs_gx_report.txt"
+    params:
+        taxid=TAXID,
+        out_dir=f"{config['project']['dir']}/{{strain}}/fcsgx/",
+        shm=config['project']['fcsgx_dir'],
+        gxdb=config['project']['fcsgx_dir'],
+        simg=config['singularity_images']['fcsgx_sif'],
+        fcsgx_script=config['scripts']['fcs-gx']
+    shell:
+        '''
+        ml python/3.9.0
+        python3 {params.fcsgx_script} \
+            --fasta {input.adaptor_fasta} \
+            --out-dir {params.out_dir} \
+            --gx-db "{params.shm}/gxdb/all" \
+            --gx-db-disk {params.gxdb} \
+            --split-fasta \
+            --tax-id {params.taxid} \
+            --container-engine singularity \
+            --image={params.simg}
+        '''
+
+rule run_removeContam:
+    resources:
+        cpus = 12,
+        mem_gb = 96
+    singularity:
+        config['singularity_images']['longread_assembly']
+    input:
+        fcs_file=f"{config['project']['dir']}/{{strain}}/fcsgx/{{strain}}.fcs-adaptor.7214.fcs_gx_report.txt",
+        draft=f"{config['project']['dir']}/{{strain}}/{{strain}}.fcs-adaptor.fasta"
+    output:
+        clean_genome=temp(f"{config['project']['dir']}/{{strain}}/{{strain}}.cleaned.fasta"),
+        genome_bed=temp(f"{config['project']['dir']}/{{strain}}/{{strain}}.genome.bed"),
+        contam_bed=temp(f"{config['project']['dir']}/{{strain}}/{{strain}}.contam.bed"),
+        keep_bed=temp(f"{config['project']['dir']}/{{strain}}/{{strain}}.keep.bed")
+    shell:
+        '''
+        samtools faidx {input.draft} --fai-idx - | awk '{{print $1"\t"0"\t"$2}}' > {output.genome_bed}
+        cat {input.fcs_file} | grep -v "^#" | awk '{{print $1"\t"$2-1"\t"$3}}' > {output.contam_bed}
+        bedtools subtract -a {output.genome_bed} -b {output.contam_bed} > {output.keep_bed}
+        bedtools getfasta -fi {input.draft} -bed {output.keep_bed} | awk '/^>/{{print ">contig_" ++i; next}}{{print}}' > {output.clean_genome}
+        '''
+
+########################
+# Get assembly metrics #
+########################
+
+rule run_QC_prescaffold:
+    resources:
+        cpus = 2,
+        mem_gb = 8
+    singularity:
+        config['singularity_images']['longread_assembly']
+    input:
+        f"{config['project']['dir']}/{{strain}}/{{strain}}.cleaned.fasta"
+    output:
+        f"{config['project']['dir']}/{{strain}}/qc/{{strain}}_qc_prescaffold.txt"
+    params:
+        qc_dir=f"{config['project']['dir']}/{{strain}}/qc/"
+    shell:
+        '''
+        mkdir -p {params.qc_dir}
+        gt seqstat {input} > {output}
+        '''
+
+####################################
+# Scaffold against dm6 with RagTag #
+####################################
+
+rule run_ragtag:
+    resources:
+        cpus = 8,
+        mem_gb = 16
+    singularity:
+        config['singularity_images']['longread_assembly']
+    input:
+        ref=config['reference']['location'],
+        fasta=f"{config['project']['dir']}/{{strain}}/{{strain}}.cleaned.fasta"
+    output:
+        f"{config['project']['dir']}/{{strain}}/ragtag/ragtag.scaffold.fasta"
+    params:
+        work_dir=f"{config['project']['dir']}/{{strain}}/ragtag/"
+    shell:
+        '''
+        ragtag.py scaffold -t $(nproc) -o {params.work_dir} {input.ref} {input.fasta}
+        sed -i 's/_RagTag//g' {output}
+        '''
+
+###################################
+# Get scaffolded assembly metrics #
+###################################
+
+rule run_QC_postscaffold:
+    resources:
+        cpus = 4,
+        mem_gb = 16
+    singularity:
+        config['singularity_images']['longread_assembly']
+    input:
+        f"{config['project']['dir']}/{{strain}}/ragtag/ragtag.scaffold.fasta"
+    output:
+        seqstats=f"{config['project']['dir']}/{{strain}}/qc/{{strain}}_qc_postscaffold.txt",
+        busco=f"{config['project']['dir']}/{{strain}}/qc/{{strain}}_busco.txt"
+    params:
+        busco_lin_dir=config['project']['busco_dir'],
+        busco_strain_dir=f"{config['project']['dir']}/{{strain}}/busco",
+        busco_family = config['models']['busco']
+    shell:
+        '''
+        gt seqstat {input} > {output.seqstats}
+        mkdir -p {params.busco_lin_dir} {params.busco_strain_dir}
+        if [ ! -d {params.busco_lin_dir}/{params.busco_family} ]; then
+            compleasm.py download -L {params.busco_lin_dir} {params.busco_family}
+        fi
+        compleasm.py run -a {input} -o {params.busco_strain_dir} -t $(nproc) -l {params.busco_family} \
+            -L {params.busco_lin_dir} > {output.busco}
+        '''
+
+###############################
+# Generate RepeatModeler for  #
+# each assembly, then mask    #
+# This will take days. Can    #
+# use prebuilt libraries.     #
+###############################
+
+rule run_repeatModelerDB:
+    resources:
+        cpus = 4,
+        mem_gb = 16
+    singularity:
+        config['singularity_images']['longread_assembly']
+    input:
+        f"{config['project']['dir']}/{{strain}}/ragtag/ragtag.scaffold.fasta"
+    output:
+        temp(f"{config['project']['dir']}/{{strain}}/rmdb/{{strain}}.nhr"),
+        temp(f"{config['project']['dir']}/{{strain}}/rmdb/{{strain}}.nin"),
+        temp(f"{config['project']['dir']}/{{strain}}/rmdb/{{strain}}.njs"),
+        temp(f"{config['project']['dir']}/{{strain}}/rmdb/{{strain}}.nnd"),
+        temp(f"{config['project']['dir']}/{{strain}}/rmdb/{{strain}}.nni"),
+        temp(f"{config['project']['dir']}/{{strain}}/rmdb/{{strain}}.nog"),
+        temp(f"{config['project']['dir']}/{{strain}}/rmdb/{{strain}}.nsq"),
+        f"{config['project']['dir']}/{{strain}}/rmdb/ragtag.scaffold.fasta"
+    params:
+        workdir=f"{config['project']['dir']}/{{strain}}/rmdb/",
+        dbname=f"{config['project']['dir']}/{{strain}}/rmdb/{{strain}}"
+    shell:
+        '''
+        mkdir -p {params.workdir}
+        cp {input} {params.workdir}
+        BuildDatabase -name {params.dbname} {input}
+        '''
+
+rule run_repeatModeler:
+    resources:
+        time = "6-00:00:00",
+        cpus = 16,
+        mem_gb = 96,
+        partition = "dpetrov,hns"
+    singularity:
+        config['singularity_images']['longread_assembly']
+    input:
+        f"{config['project']['dir']}/{{strain}}/rmdb/{{strain}}.nhr",
+        f"{config['project']['dir']}/{{strain}}/rmdb/{{strain}}.nin",
+        f"{config['project']['dir']}/{{strain}}/rmdb/{{strain}}.njs",
+        f"{config['project']['dir']}/{{strain}}/rmdb/{{strain}}.nnd",
+        f"{config['project']['dir']}/{{strain}}/rmdb/{{strain}}.nni",
+        f"{config['project']['dir']}/{{strain}}/rmdb/{{strain}}.nog",
+        f"{config['project']['dir']}/{{strain}}/rmdb/{{strain}}.nsq",
+        f"{config['project']['dir']}/{{strain}}/rmdb/ragtag.scaffold.fasta"
+    output:
+        f"{config['project']['dir']}/{{strain}}/rmdb/{{strain}}-families.fa"
+    params:
+        f"{config['project']['dir']}/{{strain}}/rmdb/"
+    shell:
+        '''
+        cd {params}
+        RepeatModeler -database {wildcards.strain} -threads $(nproc) -LTRStruct
+        '''
+
+rule run_denovoRepeatMasker:
+    resources:
+        time = "2-00:00:00",
+        cpus = 32,
+        mem_gb = 32
+    singularity:
+        config['singularity_images']['longread_assembly']
+    input:
+        rm_genome=f"{config['project']['dir']}/{{strain}}/ragtag/ragtag.scaffold.fasta",
+        lib=f"{config['project']['dir']}/{{strain}}/rmdb/{{strain}}-families.fa"
+    output:
+        genome=f"{config['project']['dir']}/{{strain}}/assembly/{{strain}}.rm.fasta",
+        gff=f"{config['project']['dir']}/{{strain}}/assembly/{{strain}}.rm.gff"
+    shell:
+        '''
+        RepeatMasker -lib {input.lib} \
+            -xsmall -gff -pa $(nproc) {input.rm_genome}
+        mv {input.rm_genome}.masked {output.genome}
+        mv {input.rm_genome}.out.gff {output.gff}
+        '''
