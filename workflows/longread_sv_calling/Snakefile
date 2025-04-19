@@ -1,0 +1,427 @@
+#! /usr/bin/env python
+###########################################################################################
+# James A. Hemker, 2025
+# Snakemake pipeline for SV calling long reads and long-read assemblies
+# Input files:
+#       parameters_config.yaml - contains various parameters needed for this Snakefile
+#           [strains] - id of each strain/individual. Each id on a line, no header
+#           [tools] - name of each tool to be used. Each tool on a line, no header
+#           [reference][location] - Fasta file of reference genome for alignment
+#           [envs][ultralong_paper] - location of conda env
+#           [scripts][dup_to_ins] - script to switch duplications to insertions in VCFs
+#           [singularity_image][pav] - location to PAV sif
+#
+#       Each strain/individual should have its own directory in the directory
+#       specified in parameters_config.yaml, formatted as follows:
+#       strain_id/
+#           reads/
+#               strain_id.fastq.gz
+#           assembly/
+#               strain_id.fasta
+###########################################################################################
+import os
+
+STRAINS = open(config["strains"], 'r').readlines()
+STRAINS = [x.rstrip() for x in STRAINS]
+
+TOOLS = open(config["tools"], 'r').readlines()
+TOOLS = [x.rstrip() for x in TOOLS]
+
+#######################################################
+#   Change the rule all depending on desired output   #
+#######################################################
+
+# Standard rule all that will run through the entire pipeline.
+# Outputs the pop-level, merged vcf.
+rule all:
+    input:
+        f"{config['project']['dir']}/population/{config['project']['name']}.joint.euchromatic.vcf.gz"
+
+###########################################################
+#   Generate any necessary bam files for the SV callers   #
+###########################################################
+
+rule reference_index:
+    singularity:
+        config['singularity_images']['longread_sv_calling']
+    input:
+        config['reference']['location']
+    output:
+        f"{config['reference']['location']}.fai"
+    shell:
+        "samtools index {input}"
+
+rule align_reads:
+    resources:
+        time = "4:00:00",
+        cpus = 16,
+        mem_mb = 32000
+    singularity:
+        config['singularity_images']['longread_sv_calling']
+    input:
+        ref=config['reference']['location'],
+        ref_idx=f"{config['reference']['location']}.fai",
+        reads=f"{config['project']['dir']}/{{strain}}/reads/{{strain}}.fastq.gz"
+    output:
+        bamfile=f"{config['project']['dir']}/{{strain}}/bams/{{strain}}.reads.sorted.bam",
+        bamindex=f"{config['project']['dir']}/{{strain}}/bams/{{strain}}.reads.sorted.bam.bai",
+        bam_location=f"{config['project']['dir']}/{{strain}}/bams/{{strain}}.bam.txt"
+    params:
+        samfile=f"{config['project']['dir']}/{{strain}}/bams/{{strain}}.reads.sam"
+    shell:
+        '''
+        minimap2 -a -x map-ont -t $(nproc) {input.ref} {input.reads} > {params.samfile}
+        samtools sort -o {output.bamfile} {params.samfile}
+        samtools index -b {output.bamfile}
+        ls {output.bamfile} > {output.bam_location}
+        rm {params.samfile}
+        '''
+
+rule align_genome:
+    resources:
+        time = "4:00:00",
+        cpus = 16,
+        mem_mb = 64000
+    singularity:
+        config['singularity_images']['longread_sv_calling']
+    input:
+        ref=config['reference']['location'],
+        ref_idx=f"{config['reference']['location']}.fai",
+        genome=f"{config['project']['dir']}/{{strain}}/assembly/{{strain}}.fasta"
+    output:
+        bamfile=f"{config['project']['dir']}/{{strain}}/bams/{{strain}}.asm.sorted.bam",
+        bamindex=f"{config['project']['dir']}/{{strain}}/bams/{{strain}}.asm.sorted.bam.bai"
+    params:
+        samfile=f"{config['project']['dir']}/{{strain}}/bams/{{strain}}.asm.sam"
+    shell:
+        '''
+        minimap2 -a -x asm5 --eqx --cs -t $(nproc) {input.ref} {input.genome} > {params.samfile}
+        samtools sort -o {output.bamfile} {params.samfile}
+        samtools index -b {output.bamfile}
+        rm {params.samfile}
+        '''
+
+#########################################################
+#   Run each SV caller                                  #
+#   Each caller will output into                        #
+#   {strain}/sv/{caller}_[project][name]/{caller}.vcf   #
+#   Additionally, variants will be filtered for PRECISE #
+#   and PASS status, dependent on the caller.           #
+#########################################################
+
+rule sniffles:
+    resources:
+        time = "30:00",
+        cpus = 4,
+        mem_mb = 16000
+    singularity:
+        config['singularity_images']['longread_sv_calling']
+    input:
+        ref=config['reference']['location'],
+        bamfile=f"{config['project']['dir']}/{{strain}}/bams/{{strain}}.reads.sorted.bam",
+        bamindex=f"{config['project']['dir']}/{{strain}}/bams/{{strain}}.reads.sorted.bam.bai"
+    output:
+        vcf=f"{config['project']['dir']}/{{strain}}/sv/sniffles_{config['project']['name']}/sniffles.vcf"
+    params:
+        min_length=config['variant_params']['min_length'],
+        min_mapq=config['variant_params']['min_mapq'],
+        work_dir=f"{config['project']['dir']}/{{strain}}/sv/sniffles_{config['project']['name']}/",
+        tmpvcf=f"{config['project']['dir']}/{{strain}}/sv/sniffles_{config['project']['name']}/tmp.vcf"
+    shell:
+        '''
+        mkdir -p {params.work_dir}
+        sniffles -i {input.bamfile} \
+            --reference {input.ref} \
+            --minsupport auto \
+            --minsvlen {params.min_length} \
+            --threads $(nproc) \
+            --allow-overwrite \
+            --output-rnames \
+            --mapq {params.min_mapq} \
+            -v {params.tmpvcf}
+        bcftools view -i 'FILTER="PASS" & PRECISE=1' -o {output.vcf} {params.tmpvcf} 
+        '''
+rule cutesv:
+    resources:
+        time = "30:00",
+        cpus = 4,
+        mem_mb = 16000
+    singularity:
+        config['singularity_images']['longread_sv_calling']
+    input:
+        ref=config['reference']['location'],
+        bamfile=f"{config['project']['dir']}/{{strain}}/bams/{{strain}}.reads.sorted.bam",
+        bamindex=f"{config['project']['dir']}/{{strain}}/bams/{{strain}}.reads.sorted.bam.bai"
+    output:
+        f"{config['project']['dir']}/{{strain}}/sv/cutesv_{config['project']['name']}/cutesv.vcf"
+    params:
+        min_length=config['variant_params']['min_length'],
+        min_mapq=config['variant_params']['min_mapq'],
+        work_dir=f"{config['project']['dir']}/{{strain}}/sv/cutesv_{config['project']['name']}/work",
+        tmpvcf=f"{config['project']['dir']}/{{strain}}/sv/cutesv_{config['project']['name']}/tmp.vcf"
+    shell:
+        '''
+        rm -rf {params.work_dir}
+        mkdir -p {params.work_dir}
+        cuteSV --max_cluster_bias_INS 100 \
+            --diff_ratio_merging_INS 0.3 \
+            --max_cluster_bias_DEL 100 \
+            --diff_ratio_merging_DEL 0.3 \
+            --min_size {params.min_length} \
+            --threads $(nproc) \
+            --sample {wildcards.strain} \
+            --report_readid \
+            -q {params.min_mapq} \
+            {input.bamfile} \
+            {input.ref} \
+            {params.tmpvcf} \
+            {params.work_dir}
+        bcftools view -i 'FILTER="PASS" & PRECISE=1' -o {output} {params.tmpvcf} 
+        '''
+
+rule debreak:
+    resources:
+        cpus = 4,
+        mem_mb = 16000
+    singularity:
+        config['singularity_images']['longread_sv_calling']
+    input:
+        ref=config['reference']['location'],
+        bamfile=f"{config['project']['dir']}/{{strain}}/bams/{{strain}}.reads.sorted.bam",
+        bamindex=f"{config['project']['dir']}/{{strain}}/bams/{{strain}}.reads.sorted.bam.bai"
+    output:
+        f"{config['project']['dir']}/{{strain}}/sv/debreak_{config['project']['name']}/debreak.vcf"
+    params:
+        min_length=config['variant_params']['min_length'],
+        min_mapq=config['variant_params']['min_mapq'],
+        work_dir=f"{config['project']['dir']}/{{strain}}/sv/debreak_{config['project']['name']}/",
+        tmpvcf=f"{config['project']['dir']}/{{strain}}/sv/debreak_{config['project']['name']}/tmp.vcf"
+    shell:
+        '''
+        rm -rf {params.work_dir}
+        mkdir -p {params.work_dir}
+        debreak --bam {input.bamfile} \
+            -o {params.work_dir} \
+            --rescue_large_ins \
+            --rescue_dup \
+            --min_size {params.min_length} \
+            --min_quality {params.min_mapq} \
+            --aligner minimap2 \
+            --ref {input.ref}
+        mv {output} {params.tmpvcf}
+        bcftools view -i 'FILTER="PASS"' -o {output} {params.tmpvcf} 
+        '''
+
+rule svim_asm:
+    resources:
+        cpus = 4,
+        mem_mb = 16000
+    singularity:
+        config['singularity_images']['longread_sv_calling']
+    input:
+        ref=config['reference']['location'],
+        bamfile=f"{config['project']['dir']}/{{strain}}/bams/{{strain}}.asm.sorted.bam",
+        bamindex=f"{config['project']['dir']}/{{strain}}/bams/{{strain}}.asm.sorted.bam.bai"
+    output:
+        f"{config['project']['dir']}/{{strain}}/sv/svim-asm_{config['project']['name']}/svim-asm.vcf"
+    params:
+        min_length=config['variant_params']['min_length'],
+        min_mapq=config['variant_params']['min_mapq'],
+        work_dir=f"{config['project']['dir']}/{{strain}}/sv/svim-asm_{config['project']['name']}/"
+    shell:
+        '''
+        rm -rf {params.work_dir}
+        mkdir -p {params.work_dir}
+        svim-asm haploid \
+            --min_sv_size {params.min_length} \
+            --min_mapq {params.min_mapq} \
+            --sample {wildcards.strain} \
+            {params.work_dir} \
+            {input.bamfile} \
+            {input.ref}
+        bcftools view -i 'FILTER="PASS"' -o {output} {params.work_dir}/variants.vcf
+        '''
+
+rule pav:
+    resources:
+        time = "24:00:00",
+        cpus = 16,
+        mem_mb = 64000
+    input:
+        ref=config['reference']['location'],
+        assembly=f"{config['project']['dir']}/{{strain}}/assembly/{{strain}}.fasta"
+    output:
+        f"{config['project']['dir']}/{{strain}}/sv/pav_{config['project']['name']}/pav.vcf"
+    params:
+        min_length=config['variant_params']['min_length'],
+        min_mapq=config['variant_params']['min_mapq'],
+        work_dir=f"{config['project']['dir']}/{{strain}}/sv/pav_{config['project']['name']}/",
+        sif=config['singularity_images']['pav']
+    shell:
+        '''
+        rm -rf {params.work_dir}
+        mkdir -p {params.work_dir}
+        echo -e "NAME\tHAP1\tHAP2\n{wildcards.strain}\t{input.assembly}\n" > {params.work_dir}/assemblies.tsv
+        echo -e "{{\n\t\\"reference\\":\\"{input.ref}\\"\n}}\n" > {params.work_dir}/config.json
+        cd {params.work_dir}
+        singularity run --bind "$(pwd):$(pwd)" {params.sif} -c $(nproc)
+        bcftools view -i 'SVLEN >= {params.min_length} | SVLEN <= -{params.min_length}' \
+            -o {output} pav_{wildcards.strain}.vcf.gz
+        '''
+
+###########################################
+#   Filter and merge each strain's vcfs.  #
+#   Filter out non-common VCF fields for  #
+#   merging, variants outside of the main #
+#   fly chroms, switch all DUP to INS,    #
+#   keep only INS, DEL, INV.              #
+###########################################
+
+rule filter_strain_vcf:
+    singularity:
+        config['singularity_images']['longread_sv_calling']
+    input:
+        ref=config['reference']['location'],
+        vcf=f"{config['project']['dir']}/{{strain}}/sv/{{tool}}_{config['project']['name']}/{{tool}}.vcf"
+    output:
+        f"{config['project']['dir']}/{{strain}}/sv/{{tool}}_{config['project']['name']}/{{strain}}.{{tool}}.filtered.vcf"
+    params:
+        work_dir=f"{config['project']['dir']}/{{strain}}/sv/{{tool}}_tmp/",
+        dup_to_ins_script=config['scripts']['dup_to_ins']
+    shell:
+        '''
+        mkdir -p {params.work_dir}
+        #Rename the vcfs reheaders
+        bcftools reheader -s <(echo "{wildcards.strain}") -o {params.work_dir}/{wildcards.tool}.tmp2.vcf {input.vcf}
+        #Remove INFO fields for jasmine
+        bcftools annotate -x "^INFO/PRECISE,INFO/IMPRECISE,INFO/SVLEN,INFO/SVTYPE,INFO/SUPPORT,INFO/END,INFO/STDEV_POS, \
+            INFO/STDEV_LEN,INFO/COVERAGE,INFO/STRAND,INFO/AC,INFO/SUPP_VEC,INFO/RNAMES,INFO/AF,INFO/SUPP,INFO/IDLIST, \
+            INFO/SVMETHOD,^FORMAT/GT,FORMAT/GQ,FORMAT/DR,FORMAT/DV,FORMAT/ID" \
+            -o {params.work_dir}/{wildcards.tool}.tmp3.vcf \
+            {params.work_dir}/{wildcards.tool}.tmp2.vcf
+        #Filter the vcf to only keep variants in the six major chromosomes
+        bgzip -c {params.work_dir}/{wildcards.tool}.tmp3.vcf > {params.work_dir}/{wildcards.tool}.tmp3.vcf.gz
+        bcftools index -f {params.work_dir}/{wildcards.tool}.tmp3.vcf.gz
+        bcftools view --regions 2L,2R,3L,3R,X {params.work_dir}/{wildcards.tool}.tmp3.vcf.gz > \
+            {params.work_dir}/{wildcards.tool}.tmp4.vcf
+        #Convert all duplications to insertions
+        python {params.dup_to_ins_script} {params.work_dir}/{wildcards.tool}.tmp4.vcf {output} {input.ref}
+        rm -r {params.work_dir}
+        '''
+
+def get_strain_vcfs(wc):
+    return expand(f"{config['project']['dir']}/{{strain}}/sv/{{tool}}_{config['project']['name']}/{{strain}}.{{tool}}.filtered.vcf",strain = {wc.strain}, tool=TOOLS)
+
+rule jasmine_strain:
+    singularity:
+        config['singularity_images']['longread_sv_calling']
+    input:
+        strain_vcf_list=get_strain_vcfs,
+        bamfile=f"{config['project']['dir']}/{{strain}}/bams/{{strain}}.reads.sorted.bam",
+        ref=config['reference']['location']
+    output:
+        vcf=f"{config['project']['dir']}/{{strain}}/sv/jasmine_{config['project']['name']}/{{strain}}.joint.filtered.vcf",
+        vcf_location=temporary(f"{config['project']['dir']}/{{strain}}/sv/jasmine_{config['project']['name']}/{{strain}}.jasmine.txt")
+    params:
+        work_dir=f"{config['project']['dir']}/{{strain}}/sv/jasmine_tmp",
+        out_dir=f"{config['project']['dir']}/{{strain}}/sv/jasmine_{config['project']['name']}",
+        min_caller_support=config['variant_params']['min_caller_support'],
+        min_length=config['variant_params']['min_length'],
+        tmp_vcf=f"{config['project']['dir']}/{{strain}}/sv/jasmine_tmp/{{strain}}.joint.tmp.vcf"
+    shell:
+        '''
+        for v in {input.strain_vcf_list}; do 
+            echo $v >> {params.work_dir}/vcf.list
+        done
+        mkdir -p {params.work_dir}
+        jasmine file_list={params.work_dir}/vcf.list \
+            out_file={params.tmp_vcf} \
+            max_dist_linear=0.5 \
+            min_dist=100 \
+            threads=$(nproc) \
+            spec_reads=1 \
+            spec_len={params.min_length} \
+            genome_file={input.ref} \
+            bam_list=$(echo {input.bamfile}) \
+            out_dir={params.out_dir} \
+            min_support={params.min_caller_support} \
+            --dup-to-ins \
+            --mark-specific \
+            --normalize-type
+        bcftools sort {params.tmp_vcf} | bcftools view -i "SVTYPE='INS' | SVTYPE='DEL' | SVTYPE='INV'" > {output.vcf}
+        ls {output.vcf} > {output.vcf_location}
+        rm -r {params.work_dir}
+        '''
+
+##################################################
+#   Merge all strain's vcfs into pop-level vcf   #
+##################################################
+
+rule get_jasmine_lists:
+    input:
+        vcf=expand(f"{config['project']['dir']}/{{strain}}/sv/jasmine_{config['project']['name']}/{{strain}}.jasmine.txt", strain=STRAINS),
+        bam=expand(f"{config['project']['dir']}/{{strain}}/bams/{{strain}}.bam.txt", strain=STRAINS)
+    output:
+        vcflist=f"{config['project']['dir']}/{config['project']['name']}_vcfs.list",
+        bamlist=f"{config['project']['dir']}/{config['project']['name']}_bams.list"
+    shell:
+        '''
+        cat {input.vcf} > {output.vcflist}
+        cat {input.bam} > {output.bamlist}
+        '''
+
+rule jasmine_pop:
+    resources:
+        mem_gb = 8
+    singularity:
+        config['singularity_images']['longread_sv_calling']
+    input:
+        ref=config['reference']['location'],
+        vcflist=f"{config['project']['dir']}/{config['project']['name']}_vcfs.list",
+        bamlist=f"{config['project']['dir']}/{config['project']['name']}_bams.list"
+    output:
+        vcf=f"{config['project']['dir']}/population/{config['project']['name']}.joint.vcf",
+        vcf_bgzip=f"{config['project']['dir']}/population/{config['project']['name']}.joint.vcf.gz"
+    params:
+        min_length=config['variant_params']['min_length'],
+        outdir=f"{config['project']['dir']}/population/"
+    shell:
+        '''
+        mkdir -p {params.outdir}
+        jasmine file_list={input.vcflist} \
+            out_file={params.outdir}/tmp.vcf \
+            max_dist_linear=0.5 \
+            min_dist=100 \
+            threads=$(nproc) \
+            spec_len={params.min_length} \
+            genome_file={input.ref} \
+            bam_list={input.bamlist} \
+            out_dir={params.outdir} \
+            min_support=1 \
+            --dup-to-ins \
+            --mark-specific \
+            --normalize-type
+        bcftools sort -o {output.vcf} {params.outdir}/tmp.vcf
+        rm {params.outdir}/tmp.vcf
+        bgzip -c {output.vcf} > {output.vcf}.gz
+        bcftools index {output.vcf_bgzip}
+        '''
+
+rule filter_euchromatic:
+    resources:
+        cpus = 4,
+        mem_mb = 8000
+    singularity:
+        config['singularity_images']['longread_sv_calling']
+    input:
+        f"{config['project']['dir']}/population/{config['project']['name']}.joint.vcf.gz"
+    output:
+        euchromatic_vcf=f"{config['project']['dir']}/population/{config['project']['name']}.joint.euchromatic.vcf",
+        euchromatic_bgzip=f"{config['project']['dir']}/population/{config['project']['name']}.joint.euchromatic.vcf.gz"
+    params:
+        euchromatic_bed=config['reference']['euchromatic']
+    shell:
+        '''
+        bcftools view -R {params.euchromatic_bed} {input} > {output.euchromatic_vcf}
+        bgzip -c {output.euchromatic_vcf} > {output.euchromatic_bgzip}
+        '''
