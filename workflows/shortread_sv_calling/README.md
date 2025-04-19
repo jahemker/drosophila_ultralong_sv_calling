@@ -17,7 +17,7 @@ reference:
   location: # path to reference fasta
   euchromatic: # path to bedfile containing coordinates for final region filtering
 project:
-  name: # name of this run"snakemake_shortread"
+  name: # name of this run
   dir: # path to directory where all strain dirs/files are found
 strains: # a file with each strain id on a single line. No headers or whitespace.
 tools: # a file with each tool name on a single line. No headers or whitespace.
