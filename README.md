@@ -9,7 +9,7 @@ singularity build longread_assembly.sif docker://jahemker/longread_assembly:late
 ```
 A conda environment to run snakemake (version >=9) is easiest.
 ```
-conda create -n snakemake -c conda-forge -c bioconda snakemake
+conda create -n snakemake -c conda-forge -c bioconda snakemake snakemake-executor-plugin-cluster-generic
 ```
 
 For workflow-specific details, see README files.
