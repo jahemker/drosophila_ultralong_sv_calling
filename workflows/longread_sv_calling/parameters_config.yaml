@@ -15,5 +15,3 @@ variant_params:
 singularity_images:
   longread_sv_calling: "/scratch/users/jahemker/singularity_images/longread_sv_calling.sif"
   pav: "/home/groups/dpetrov/jahemker/singularity_images/pav_latest.sif"
-scripts:
-  dup_to_ins: "/home/users/jahemker/seasonal-nanopore/sv_calling/vcf_dup_to_ins.py"

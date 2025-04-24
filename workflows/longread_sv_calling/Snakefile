@@ -286,8 +286,7 @@ rule filter_strain_vcf:
     output:
         f"{config['project']['dir']}/{{strain}}/sv/{{tool}}_{config['project']['name']}/{{strain}}.{{tool}}.filtered.vcf"
     params:
-        work_dir=f"{config['project']['dir']}/{{strain}}/sv/{{tool}}_tmp/",
-        dup_to_ins_script=config['scripts']['dup_to_ins']
+        work_dir=f"{config['project']['dir']}/{{strain}}/sv/{{tool}}_tmp/"
     shell:
         '''
         mkdir -p {params.work_dir}
@@ -305,7 +304,7 @@ rule filter_strain_vcf:
         bcftools view --regions 2L,2R,3L,3R,X {params.work_dir}/{wildcards.tool}.tmp3.vcf.gz > \
             {params.work_dir}/{wildcards.tool}.tmp4.vcf
         #Convert all duplications to insertions
-        python {params.dup_to_ins_script} {params.work_dir}/{wildcards.tool}.tmp4.vcf {output} {input.ref}
+        python /usr/local/bin/vcf_dup_to_ins.py {params.work_dir}/{wildcards.tool}.tmp4.vcf {output} {input.ref}
         rm -r {params.work_dir}
         '''
 
@@ -330,10 +329,10 @@ rule jasmine_strain:
         tmp_vcf=f"{config['project']['dir']}/{{strain}}/sv/jasmine_tmp/{{strain}}.joint.tmp.vcf"
     shell:
         '''
+        mkdir -p {params.work_dir}
         for v in {input.strain_vcf_list}; do 
             echo $v >> {params.work_dir}/vcf.list
         done
-        mkdir -p {params.work_dir}
         jasmine file_list={params.work_dir}/vcf.list \
             out_file={params.tmp_vcf} \
             max_dist_linear=0.5 \
