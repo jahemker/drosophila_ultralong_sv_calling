@@ -308,7 +308,7 @@ rule filter_strain_vcf:
         #Remove INFO fields for jasmine
         bcftools annotate -x "^INFO/PRECISE,INFO/IMPRECISE,INFO/SVLEN,INFO/SVTYPE,INFO/SUPPORT,INFO/END,INFO/STDEV_POS, \
             INFO/STDEV_LEN,INFO/COVERAGE,INFO/STRAND,INFO/AC,INFO/SUPP_VEC,INFO/RNAMES,INFO/AF,INFO/SUPP,INFO/IDLIST, \
-            INFO/SVMETHOD,^FORMAT/GT,FORMAT/GQ,FORMAT/DR,FORMAT/DV,FORMAT/ID" \
+            INFO/SVMETHOD,^FORMAT/GT,FORMAT/GQ,FORMAT/ID" \
             -o {params.work_dir}/{wildcards.tool}.tmp3.vcf \
             {params.work_dir}/{wildcards.tool}.tmp2.vcf
         #Filter the vcf to only keep variants in the five major chromosomes and only SVs >=50bp
@@ -339,19 +339,18 @@ rule jasmine_strain:
     params:
         work_dir=f"{config['project']['dir']}/{{strain}}/sv/jasmine_tmp",
         out_dir=f"{config['project']['dir']}/{{strain}}/sv/jasmine_{config['project']['name']}",
-        vcf_list="{strain}/sv/jasmine_tmp/vcf.list",
         min_caller_support=config['variant_params']['min_caller_support'],
         min_length=config['variant_params']['min_length'],
-        tmp_vcf="{strain}/sv/jasmine_tmp/{strain}.joint.tmp.vcf",
-        tmp_vcf2="{strain}/sv/jasmine_tmp/{strain}.joint.tmp2.vcf",
-        dup_to_ins_script=config['scripts']['dup_to_ins']
+        tmp_vcf=f"{config['project']['dir']}/{{strain}}/sv/jasmine_tmp/{{strain}}.joint.tmp.vcf",
+        tmp_vcf2=f"{config['project']['dir']}/{{strain}}/sv/jasmine_tmp/{{strain}}.joint.tmp2.vcf"
     shell:
         '''
+        mkdir -p {params.work_dir}
+        rm -f {params.work_dir}/vcf.list
         for v in {input.strain_vcf_list}; do 
             echo $v >> {params.work_dir}/vcf.list
         done
-        mkdir -p {params.work_dir}
-        jasmine file_list={params.vcf_list} \
+        jasmine file_list={params.work_dir}/vcf.list \
             out_file={params.tmp_vcf} \
             max_dist_linear=0.5 \
             min_dist=100 \
@@ -367,7 +366,7 @@ rule jasmine_strain:
             --normalize-type
         bcftools sort {params.tmp_vcf} | bcftools view -i 'SVLEN >= 50 | SVLEN <= -50' | grep -v "SVTYPE=TRA\|SVTYPE=BND" > {params.tmp_vcf2}
         #Convert all duplications to insertions
-        python {params.dup_to_ins_script} {params.tmp_vcf2} {output.vcf}
+        python3 /usr/local/bin/vcf_dup_to_ins.py {params.tmp_vcf2} {output.vcf} {input.ref}
         ls {output.vcf} > {output.vcf_location}
         rm -r {params.work_dir}
         '''
@@ -409,7 +408,7 @@ rule jasmine_pop:
         '''
         mkdir -p {params.outdir}
         jasmine file_list={input.vcflist} \
-            out_file={config[project][name]}/tmp.vcf \
+            out_file={params.outdir}/tmp.vcf \
             max_dist_linear=0.5 \
             min_dist=100 \
             threads=$(nproc) \
@@ -421,8 +420,8 @@ rule jasmine_pop:
             --dup-to-ins \
             --mark-specific \
             --normalize-type
-        bcftools sort -o {output.vcf} {config[project][dir]}/tmp.vcf
-        rm {config[project][dir]}/tmp.vcf
+        bcftools sort -o {output.vcf} {params.outdir}/tmp.vcf
+        rm {params.outdir}/tmp.vcf
         bgzip -c {output.vcf} > {output.vcf}.gz
         bcftools index {output.vcf_bgzip}
         '''

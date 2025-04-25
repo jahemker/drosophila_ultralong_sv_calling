@@ -330,6 +330,7 @@ rule jasmine_strain:
     shell:
         '''
         mkdir -p {params.work_dir}
+        rm -f {params.work_dir}/vcf.list
         for v in {input.strain_vcf_list}; do 
             echo $v >> {params.work_dir}/vcf.list
         done
