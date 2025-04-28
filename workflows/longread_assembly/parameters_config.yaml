@@ -1,6 +1,5 @@
 reference:
   location: "/scratch/users/jahemker/seasonal_inbred/D.melanogaster.fa"
-  euchromatic: "/scratch/users/jahemker/seasonal_inbred/reference/dm6/bedfiles/euchromatic_regions.sorted.bed"
 project:
   dir: "/scratch/users/jahemker/seasonal_inbred/longread_assembly_test"
   fcsgx_dir: "/scratch/users/jahemker/fcs"
@@ -18,4 +17,4 @@ singularity_images:
   fcs-adaptor: "/home/groups/dpetrov/jahemker/singularity_images/fcs-adaptor.sif"
 scripts:
   fcs-adaptor: "/home/users/jahemker/seasonal-nanopore/fcs/run_fcsadaptor.sh"
-  fcs-gx: "/home/users/jahemker/seasonal-nanopore/fcs/run_fcsfx.py"
+  fcs-gx: "/home/users/jahemker/seasonal-nanopore/fcs/run_fcsgx.py"
