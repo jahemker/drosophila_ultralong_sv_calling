@@ -35,6 +35,9 @@ with open(bedfile, 'w') as f1:
             # BED output with extra details
             # f1.write(f"{chrom}\t{start}\t{end}\t{name}\t{svtype}\t{length}\t{suppvec}\t{supp}\n")
 
+            # CSV output that can be pasted into excel for easier manual validation
+            #f1.write(f"{chrom},{start},{int(start)+1},{chrom},{end},{int(end)+1},{name},{svtype},{length},{suppvec}\n")
+
             # Fasta output of INS and DEL variant sequence
             # if svtype=="DEL" and "DEL" not in ref:
             #     f1.write(f">{name}\n")
