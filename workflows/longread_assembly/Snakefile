@@ -70,7 +70,7 @@ rule run_dorado:
     resources:
         time = "16:00:00",
         cpus = 8,
-        mem_gb = 32,
+        mem_mb = 32000,
         partition = "gpu,owners",
         constraint = '"GPU_GEN:VLT|GPU_GEN:AMP"',
         gpus = "gpu:4"
@@ -130,7 +130,7 @@ rule run_flye:
     resources:
         time = "48:00:00",
         cpus = 16,
-        mem_gb = 128
+        mem_mb = 128000
     singularity:
         config['singularity_images']['longread_assembly']
     input:
@@ -158,7 +158,7 @@ rule run_flye:
 rule run_purgeMap:
     resources:
         cpus = 12,
-        mem_gb = 64
+        mem_mb = 64000
     singularity:
         config['singularity_images']['longread_assembly']
     input:
@@ -204,7 +204,7 @@ rule run_purgeSplit:
 rule run_purgeSplitMap:
     resources:
         cpus = 12,
-        mem_gb = 32
+        mem_mb = 32000
     singularity:
         config['singularity_images']['longread_assembly']
     input:
@@ -218,7 +218,7 @@ rule run_purgeSplitMap:
 
 rule run_purgePurge:
     resources:
-        mem_gb = 32
+        mem_mb = 32000
     singularity:
         config['singularity_images']['longread_assembly']
     input:
@@ -249,7 +249,7 @@ rule run_medakaAlign:
     resources:
         time = "6:00:00",
         cpus = 12,
-        mem_gb = 92
+        mem_mb = 92000
     singularity:
         config['singularity_images']['longread_assembly']
     input:
@@ -268,9 +268,10 @@ rule run_medakaConsensus:
     resources:
         time = "4:00:00",
         cpus = 4,
-        mem_gb = 32,
+        mem_mb = 32000,
         partition = "gpu,owners",
-        slurm_extra = "'constrain=\"GPU_GEN:VLT|GPU_GEN:AMP\" gpus=gpu:1'"
+        constraint = '"GPU_GEN:VLT|GPU_GEN:AMP"',
+        gpus = "gpu:1"
     singularity:
         config['singularity_images']['longread_assembly']
     input:
@@ -288,7 +289,7 @@ rule run_medakaConsensus:
 rule run_medakaStitch:
     resources:
         cpus = 8,
-        mem_gb = 64
+        mem_mb = 64000
     singularity:
         config['singularity_images']['longread_assembly']
     input:
@@ -312,7 +313,7 @@ rule run_medakaStitch:
 rule run_FCSadaptor:
     resources:
         cpus = 4,
-        mem_gb = 16
+        mem_mb = 16000
     singularity:
         config['singularity_images']['longread_assembly']
     input:
@@ -346,7 +347,7 @@ rule run_FCSadaptor:
 rule download_gxdb:
     resources:
         time = "24:00:00",
-        mem_gb = 16
+        mem_mb = 16000
     singularity:
         config['singularity_images']['longread_assembly']
     output:
@@ -369,7 +370,7 @@ rule run_FCSgx:
     resources:
         time = "5:00:00",
         cpus = 12,
-        mem_gb = 512,
+        mem_mb = 512000,
         parition = "bigmem"
     singularity:
         config['singularity_images']['longread_assembly']
@@ -402,7 +403,7 @@ rule run_FCSgx:
 rule run_removeContam:
     resources:
         cpus = 12,
-        mem_gb = 96
+        mem_mb = 96000
     singularity:
         config['singularity_images']['longread_assembly']
     input:
@@ -428,7 +429,7 @@ rule run_removeContam:
 rule run_QC_prescaffold:
     resources:
         cpus = 2,
-        mem_gb = 8
+        mem_mb = 8000
     singularity:
         config['singularity_images']['longread_assembly']
     input:
@@ -450,7 +451,7 @@ rule run_QC_prescaffold:
 rule run_ragtag:
     resources:
         cpus = 8,
-        mem_gb = 16
+        mem_mb = 16000
     singularity:
         config['singularity_images']['longread_assembly']
     input:
@@ -473,7 +474,7 @@ rule run_ragtag:
 rule run_QC_postscaffold:
     resources:
         cpus = 4,
-        mem_gb = 16
+        mem_mb = 16000
     singularity:
         config['singularity_images']['longread_assembly']
     input:
@@ -506,7 +507,7 @@ rule run_QC_postscaffold:
 rule run_repeatModelerDB:
     resources:
         cpus = 4,
-        mem_gb = 16
+        mem_mb = 16000
     singularity:
         config['singularity_images']['longread_assembly']
     input:
@@ -534,7 +535,7 @@ rule run_repeatModeler:
     resources:
         time = "6-00:00:00",
         cpus = 16,
-        mem_gb = 96,
+        mem_mb = 96000,
         partition = "dpetrov,hns"
     singularity:
         config['singularity_images']['longread_assembly']
@@ -561,7 +562,7 @@ rule run_denovoRepeatMasker:
     resources:
         time = "2-00:00:00",
         cpus = 32,
-        mem_gb = 32
+        mem_mb = 32000
     singularity:
         config['singularity_images']['longread_assembly']
     input:
