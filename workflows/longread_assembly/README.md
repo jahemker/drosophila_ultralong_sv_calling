@@ -6,6 +6,11 @@ Requires nodes with GPUs and nodes with access to high memory (>= 512Gb). Specif
 
 Estimated time to complete: ~1 week. Most of the time will be due to Dorado basecalling (~1 day), Flye assembly (especially for very long reads; ~1-2 days), and RepeatModeler library generation (~3-4 days). A pre-existing repeat library can be used to signficantly speed up the workflow.
 
+For RepeatMasker and RepeatModeler, please use the tetools docker image from dfam (https://hub.docker.com/r/dfam/tetools/tags). Tag 1.8 of the container was used.
+```
+singularity build tetools.sif docker://dfam/tetools:1.8
+```
+
 For the Foreign Contamination Screen, please find relevant information and singularity images here: https://github.com/ncbi/fcs
 ---
 User-specific parameters are found in `parameters_config.yaml`. Please also note that `submit_snakemake.sh` will have to be changed for your own HPCC.
