@@ -1,14 +1,13 @@
-FROM ubuntu:24.04 AS build
+FROM ubuntu:20.04 AS build
 
 # Install basic packages
 RUN apt-get update && \
-    apt-get install -y \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
         bzip2 \
         cmake \
         curl \
         gcc \
         git \
-        hmmer \
         libbz2-dev \
         liblzma-dev \
         libncurses5-dev \
@@ -29,6 +28,20 @@ RUN wget -q https://github.com/samtools/samtools/releases/download/1.20/samtools
     && make -j \
     && make install
 
+RUN wget -q https://github.com/samtools/htslib/releases/download/1.20/htslib-1.20.tar.bz2 \
+    && tar -xjf htslib-1.20.tar.bz2 \
+    && cd /htslib-1.20 \
+    && ./configure \
+    && make -j \
+    && make install
+
+RUN wget -q https://github.com/samtools/bcftools/releases/download/\1.20/bcftools-1.20.tar.bz2 \
+    && tar -xjf bcftools-1.20.tar.bz2 \
+    && cd /bcftools-1.20 \
+    && ./configure \
+    && make -j \
+    && make install
+
 # install seqkit
 RUN wget -q https://github.com/shenwei356/seqkit/releases/\
 download/v2.3.0/seqkit_linux_amd64.tar.gz \
@@ -38,7 +51,9 @@ download/v2.3.0/seqkit_linux_amd64.tar.gz \
 
 # install dependencies for compleasm
 RUN git clone https://github.com/lh3/miniprot && \
-    cd miniprot && make
+    cd miniprot && \
+    make && \
+    mv miniprot /usr/local/bin
 
 # RUN wget http://eddylab.org/software/hmmer/hmmer-3.3.2.tar.gz && \
 #     tar -zxf hmmer-3.3.2.tar.gz && \
@@ -81,6 +96,7 @@ RUN apt-get update && \
         genometools \
         gcc \
         git \
+        hmmer \
         libboost-all-dev \
         libbz2-dev \
         libcurl4-openssl-dev \
@@ -90,6 +106,7 @@ RUN apt-get update && \
         libncurses5-dev \
         libssl-dev \
         libzmq5 \
+        pigz \
         python3.8 \
         python3-pip \
         python-is-python3 \
@@ -135,18 +152,10 @@ RUN apt-get update && \
 RUN git clone --branch "2.9.2" https://github.com/fenderglass/Flye.git \
  && cd Flye \
  && python3 setup.py install
-# RUN git clone --branch "2.9.4" https://github.com/fenderglass/Flye \
-#  && cd Flye \
-#  && python setup.py install
 
 # install medaka-cpu
 ENV SINGULARITYENV_LC_ALL="C"
 RUN pip3 install medaka==1.11.3
-# RUN git clone --branch "v1.11.3" --recursive https://github.com/nanoporetech/medaka.git \
-#  && cd medaka \
-#  && pip3 install --break-system-packages -r requirements.txt \
-#  && make -j install \
-#  && python3 setup.py install
 
 # install ragtag
 RUN pip3 install RagTag==2.1.0

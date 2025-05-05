@@ -1,7 +1,7 @@
 #!/usr/bin/Rscript
-if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
-BiocManager::install("StructuralVariantAnnotation")
-install.packages("stringr")
+#if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+#BiocManager::install("StructuralVariantAnnotation")
+#install.packages("stringr")
 library(VariantAnnotation)
 library(StructuralVariantAnnotation)
 library(stringr)

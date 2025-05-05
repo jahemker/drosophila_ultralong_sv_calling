@@ -66,11 +66,11 @@ RUN apt-get update && \
         liblzma-dev \
         libncurses5-dev \
         libssl-dev \
+        libxml2-dev \
         libzmq5 \
         python2.7-dev \
         python3.8 \
         python3-pip \
-        r-base-core \
         wget \
         zlib1g-dev && \
     rm -r /var/lib/apt/lists/*
@@ -134,8 +134,23 @@ RUN chmod uga+x /scripts/* && \
     mv /scripts/vcf_dup_to_ins.py /usr/local/bin/ && \
     mv /scripts/* /gridss/
 
+#Install R>4
+RUN apt-get update && \
+    apt-get install -y software-properties-common && \
+    wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | tee -a /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc && \
+    add-apt-repository "deb https://cloud.r-project.org/bin/linux/ubuntu focal-cran40/" && \
+    add-apt-repository ppa:marutter/rdev && \
+    apt-get update && apt-get -y install \
+    r-base \
+    r-base-dev && \
+    rm -r /var/lib/apt/lists/*
+
 #install R package for gridss script
 RUN R -e "install.packages('BiocManager')" && \
+    # R -e "install.packages('purrr')" && \
+    # R -e "install.packages('XML')" && \
+    # R -e "install.packages('cpp11')" && \
+    # R -e "install.packages('https://cran.r-project.org/src/contrib/Archive/tidyr/tidyr_1.1.0.tar.gz', repos=NULL,type='source')" && \
     R -e "BiocManager::install('StructuralVariantAnnotation')" && \
     R -e "install.packages('stringr')"
 
