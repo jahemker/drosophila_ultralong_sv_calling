@@ -48,7 +48,7 @@ TAXID = "7214"
 rule all:
     input:
         expand(f"{config['project']['dir']}/{{strain}}/qc/{{strain}}_qc_prescaffold.txt",strain=STRAINS),
-        # expand(f"{config['project']['dir']}/{{strain}}/qc/{{strain}}_qc_postscaffold.txt",strain=STRAINS),
+        expand(f"{config['project']['dir']}/{{strain}}/qc/{{strain}}_qc_postscaffold.txt",strain=STRAINS),
         expand(f"{config['project']['dir']}/{{strain}}/assembly/{{strain}}.rm.fasta",strain=STRAINS),
         expand(f"{config['project']['dir']}/{{strain}}/assembly/{{strain}}.rm.gff",strain=STRAINS)
         # expand(f"{config['project']['dir']}/{{strain}}/{{strain}}_cleanup.done",strain=STRAINS)
@@ -261,7 +261,8 @@ rule run_medakaAlign:
         reads=f"{config['project']['dir']}/{{strain}}/reads/{{strain}}.fastq.gz",
         draft=f"{config['project']['dir']}/{{strain}}/purge/{{strain}}.purged.fasta"
     output:
-        temp(f"{config['project']['dir']}/{{strain}}.calls_to_draft.bam")
+        temp(f"{config['project']['dir']}/{{strain}}.calls_to_draft.bam"),
+        temp(f"{config['project']['dir']}/{{strain}}.calls_to_draft.bam.bai")
     params:
         prefix=f"{config['project']['dir']}/{{strain}}.calls_to_draft"
     shell:
