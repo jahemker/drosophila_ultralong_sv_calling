@@ -9,6 +9,6 @@
 #SBATCH --mem-per-cpu=4G
 
 . /home/users/jahemker/.bashrc
-conda activate longread_sv
+conda activate snakemake
 
 snakemake --profile profile/
