@@ -78,8 +78,9 @@ rule bwa_index:
 #     return expand(f"{config['project']['dir']}/{wc.strain}/reads/{{fq}}", fq=strain_fastqs)
 
 rule trim_adapter:
+    threads: 12
     resources:
-        cpus = 12,
+        cpus = threads,
         mem_mb = 64000
     singularity:
         config['singularity_images']['shortread_sv_calling']
@@ -104,8 +105,9 @@ rule trim_adapter:
         '''
 
 rule bwa_map_paired:
+    threads: 12
     resources:
-        cpus = 12,
+        cpus = threads,
         mem_mb = 80000,
         partition = "gpu,owners",
         constraint = '"GPU_GEN:PSC|GPU_GEN:VLT|GPU_GEN:AMP"',
@@ -139,8 +141,9 @@ def listStrainBam(wc):
 
 #we only need to merge bams if there were multiple sets of fastqs for a strain, hence the weird if statement
 rule merge_bams:
+    threads: 12
     resources:
-        cpus = 12,
+        cpus = threads,
         mem_mb = 64000
     singularity:
         config['singularity_images']['shortread_sv_calling']
@@ -171,9 +174,10 @@ rule merge_bams:
 #########################################################
 
 rule manta:
+    threads: 4
     resources:
         time = "2:00:00",
-        cpus = 4,
+        cpus = threads,
         mem_mb = 16000
     singularity:
         config['singularity_images']['shortread_sv_calling']
@@ -201,8 +205,9 @@ rule manta:
         '''
 
 rule lumpy:
+    threads: 4
     resources:
-        cpus = 4,
+        cpus = threads,
         mem_mb = 16000
     singularity:
         config['singularity_images']['shortread_sv_calling']
@@ -224,8 +229,9 @@ rule lumpy:
         '''
 
 rule delly:
+    threads: 4
     resources:
-        cpus = 4,
+        cpus = threads,
         mem_mb = 16000
     singularity:
         config['singularity_images']['shortread_sv_calling']
@@ -246,9 +252,10 @@ rule delly:
         '''
 
 rule gridss:
+    threads: 8
     resources:
         time="6:00:00",
-        cpus = 8,
+        cpus = threads,
         mem_mb = 32000
     singularity:
         config['singularity_images']['shortread_sv_calling']
@@ -289,8 +296,9 @@ rule gridss:
 #   keep only INS, DEL, INV.              #
 ###########################################
 rule filter_strain_vcf:
+    threads: 4
     resources:
-        cpus = 4,
+        cpus = threads,
         mem_mb = 16000
     singularity:
         config['singularity_images']['shortread_sv_calling']
@@ -427,8 +435,9 @@ rule jasmine_pop:
         '''
 
 rule filter_euchromatic:
+    threads: 4
     resources:
-        cpus = 4,
+        cpus = threads,
         mem_mb = 8000
     singularity:
         config['singularity_images']['shortread_sv_calling']

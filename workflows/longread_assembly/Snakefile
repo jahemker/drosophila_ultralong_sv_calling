@@ -48,7 +48,7 @@ TAXID = "7214"
 rule all:
     input:
         expand(f"{config['project']['dir']}/{{strain}}/qc/{{strain}}_qc_prescaffold.txt",strain=STRAINS),
-        expand(f"{config['project']['dir']}/{{strain}}/qc/{{strain}}_qc_postscaffold.txt",strain=STRAINS),
+        # expand(f"{config['project']['dir']}/{{strain}}/qc/{{strain}}_qc_postscaffold.txt",strain=STRAINS),
         expand(f"{config['project']['dir']}/{{strain}}/assembly/{{strain}}.rm.fasta",strain=STRAINS),
         expand(f"{config['project']['dir']}/{{strain}}/assembly/{{strain}}.rm.gff",strain=STRAINS)
         # expand(f"{config['project']['dir']}/{{strain}}/{{strain}}_cleanup.done",strain=STRAINS)
@@ -67,9 +67,10 @@ rule all:
 #################
 
 rule run_dorado:
+    threads: 8
     resources:
         time = "16:00:00",
-        cpus = 8,
+        cpus = threads,
         mem_mb = 32000,
         partition = "gpu,owners",
         constraint = '"GPU_GEN:VLT|GPU_GEN:AMP"',
@@ -127,9 +128,10 @@ rule clean_fastq:
 #######################
 
 rule run_flye:
+    threads: 16
     resources:
         time = "48:00:00",
-        cpus = 16,
+        cpus = threads,
         mem_mb = 128000
     singularity:
         config['singularity_images']['longread_assembly']
@@ -156,8 +158,9 @@ rule run_flye:
 ###############################
 
 rule run_purgeMap:
+    threads: 12
     resources:
-        cpus = 12,
+        cpus = threads,
         mem_mb = 64000
     singularity:
         config['singularity_images']['longread_assembly']
@@ -202,8 +205,9 @@ rule run_purgeSplit:
         '''
 
 rule run_purgeSplitMap:
+    threads: 12
     resources:
-        cpus = 12,
+        cpus = threads,
         mem_mb = 32000
     singularity:
         config['singularity_images']['longread_assembly']
@@ -246,9 +250,10 @@ rule run_purgePurge:
 #########################
 
 rule run_medakaAlign:
+    threads: 12
     resources:
         time = "6:00:00",
-        cpus = 12,
+        cpus = threads,
         mem_mb = 92000
     singularity:
         config['singularity_images']['longread_assembly']
@@ -265,9 +270,10 @@ rule run_medakaAlign:
             -p {params.prefix} -t $(nproc)
         '''
 rule run_medakaConsensus:
+    threads: 4
     resources:
         time = "4:00:00",
-        cpus = 4,
+        cpus = threads,
         mem_mb = 32000,
         partition = "gpu,owners",
         constraint = '"GPU_GEN:VLT|GPU_GEN:AMP"',
@@ -287,8 +293,9 @@ rule run_medakaConsensus:
             --model {params.model} --threads $(nproc)
         '''
 rule run_medakaStitch:
+    threads: 8
     resources:
-        cpus = 8,
+        cpus = threads,
         mem_mb = 64000
     singularity:
         config['singularity_images']['longread_assembly']
@@ -311,11 +318,10 @@ rule run_medakaStitch:
 #############################################################
 
 rule run_FCSadaptor:
+    threads: 4
     resources:
-        cpus = 4,
+        cpus = threads,
         mem_mb = 16000
-    singularity:
-        config['singularity_images']['longread_assembly']
     input:
         f"{config['project']['dir']}/{{strain}}/{{strain}}.medaka.fasta"
     output:
@@ -361,19 +367,17 @@ rule download_gxdb:
         SOURCE_DB_MANIFEST={params.source_db_manifest}
         LOCAL_DB={params.local_db}
         export FCS_DEFAULT_IMAGE={params.fcs_default_image}
-        ml python/3.9.0
         python3 /scratch/users/jahemker/seasonal_inbred/fcs/fcs.py db get \
             --mft "$SOURCE_DB_MANIFEST" --dir "$LOCAL_DB/gxdb"
         '''
 
 rule run_FCSgx:
+    threads: 12
     resources:
         time = "5:00:00",
-        cpus = 12,
+        cpus = threads,
         mem_mb = 512000,
-        parition = "bigmem"
-    singularity:
-        config['singularity_images']['longread_assembly']
+        partition = "bigmem"
     input:
         adaptor_fasta=f"{config['project']['dir']}/{{strain}}/{{strain}}.fcs-adaptor.fasta",
         gxdb_gxi=f"{config['project']['fcsgx_dir']}/gxdb/all.gxi"
@@ -384,7 +388,7 @@ rule run_FCSgx:
         out_dir=f"{config['project']['dir']}/{{strain}}/fcsgx/",
         shm=config['project']['fcsgx_dir'],
         gxdb=config['project']['fcsgx_dir'],
-        simg=config['singularity_images']['fcsgx_sif'],
+        simg=config['singularity_images']['fcsgx_simg'],
         fcsgx_script=config['scripts']['fcs-gx']
     shell:
         '''
@@ -401,8 +405,9 @@ rule run_FCSgx:
         '''
 
 rule run_removeContam:
+    threads: 12
     resources:
-        cpus = 12,
+        cpus = threads,
         mem_mb = 96000
     singularity:
         config['singularity_images']['longread_assembly']
@@ -427,8 +432,9 @@ rule run_removeContam:
 ########################
 
 rule run_QC_prescaffold:
+    threads: 2
     resources:
-        cpus = 2,
+        cpus = threads,
         mem_mb = 8000
     singularity:
         config['singularity_images']['longread_assembly']
@@ -449,8 +455,9 @@ rule run_QC_prescaffold:
 ####################################
 
 rule run_ragtag:
+    threads: 8
     resources:
-        cpus = 8,
+        cpus = threads,
         mem_mb = 16000
     singularity:
         config['singularity_images']['longread_assembly']
@@ -472,8 +479,9 @@ rule run_ragtag:
 ###################################
 
 rule run_QC_postscaffold:
+    threads: 4
     resources:
-        cpus = 4,
+        cpus = threads,
         mem_mb = 16000
     singularity:
         config['singularity_images']['longread_assembly']
@@ -505,11 +513,12 @@ rule run_QC_postscaffold:
 ###############################
 
 rule run_repeatModelerDB:
+    threads: 4
     resources:
-        cpus = 4,
+        cpus = threads,
         mem_mb = 16000
     singularity:
-        config['singularity_images']['longread_assembly']
+        config['singularity_images']['tetools']
     input:
         f"{config['project']['dir']}/{{strain}}/ragtag/ragtag.scaffold.fasta"
     output:
@@ -532,13 +541,14 @@ rule run_repeatModelerDB:
         '''
 
 rule run_repeatModeler:
+    threads: 16
     resources:
         time = "6-00:00:00",
-        cpus = 16,
+        cpus = threads,
         mem_mb = 96000,
         partition = "dpetrov,hns"
     singularity:
-        config['singularity_images']['longread_assembly']
+        config['singularity_images']['tetools']
     input:
         f"{config['project']['dir']}/{{strain}}/rmdb/{{strain}}.nhr",
         f"{config['project']['dir']}/{{strain}}/rmdb/{{strain}}.nin",
@@ -559,12 +569,13 @@ rule run_repeatModeler:
         '''
 
 rule run_denovoRepeatMasker:
+    threads: 32
     resources:
         time = "2-00:00:00",
-        cpus = 32,
+        cpus = threads,
         mem_mb = 32000
     singularity:
-        config['singularity_images']['longread_assembly']
+        config['singularity_images']['tetools']
     input:
         rm_genome=f"{config['project']['dir']}/{{strain}}/ragtag/ragtag.scaffold.fasta",
         lib=f"{config['project']['dir']}/{{strain}}/rmdb/{{strain}}-families.fa"
